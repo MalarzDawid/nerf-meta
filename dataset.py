@@ -119,7 +119,7 @@ class NeRFShapeNetDataset(Dataset):
                 #self.data.append({'data': np.array(data['data']), 'images':np.array(data['images']), 'cam_poses':np.array(data['cam_poses'])})
 
             #Sort and split, same like Atlasnet
-            df = df.sort_values(by=['name'])
+            df = df.sort_values(by=['name']).head(100)
             df_train = df.head(max(1,int(len(df)*(0.8)))) #0.8
             df_test = df.tail(max(1,int(len(df)*(0.2))))
         

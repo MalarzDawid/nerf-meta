@@ -57,7 +57,7 @@ def load_many_data(basedir):
         
         p = np.array(loaded['cam_poses']).astype(np.float32)
         imgs = (np.array(loaded['images'])).astype(np.float32)
-        image_plane = ImagePlane(focal, p[list(get_train_ids())], imgs[list(get_train_ids())], 50)
+        image_plane = ImagePlane(focal, p[list(get_train_ids())], imgs[list(get_train_ids())], 20)
         
         object['images'] = imgs[list(get_train_ids())]
         object['poses'] = p[list(get_train_ids())]

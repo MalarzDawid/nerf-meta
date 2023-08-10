@@ -8,6 +8,8 @@ from datasets.shapenet import build_shapenet
 from models.nerf import build_nerf
 from utils.shape_video import create_360_video
 from models.rendering import get_rays_shapenet, sample_points, volume_render
+from dataset import NeRFShapeNetDataset
+from load_generalized import load_many_data
 
 
 def test_time_optimize(args, model, optim, imgs, poses, hwf, bound):
@@ -80,10 +82,15 @@ def test():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    test_set = build_shapenet(image_set="test", dataset_root=args.dataset_root,
-                            splits_path=args.splits_path,
-                            num_views=args.tto_views+args.test_views)
+    # test_set = build_shapenet(image_set="test", dataset_root=args.dataset_root,
+    #                         splits_path=args.splits_path,
+    #                         num_views=args.tto_views+args.test_views)
+    # test_loader = DataLoader(test_set, batch_size=1, shuffle=False)
+
+    test_set = NeRFShapeNetDataset(root_dir="data/multiple", classes=["cars"], train=False)
     test_loader = DataLoader(test_set, batch_size=1, shuffle=False)
+
+    objects, test_objects, render_poses, hwf = load_many_data(f'data/multiple/cars')
 
     model = build_nerf(args)
     model.to(device)
@@ -95,9 +102,17 @@ def test():
     savedir.mkdir(exist_ok=True)
     
     test_psnrs = []
-    for idx, (imgs, poses, hwf, bound) in enumerate(test_loader):
+
+    H, W, focal = hwf
+    H, W = int(H), int(W)
+    hwf = torch.tensor([H, W, focal])
+    bound = torch.tensor([2., 6.])
+
+    for idx, (batch) in enumerate(test_loader):
+        imgs, poses = batch["images"][0].float(), batch["cam_poses"][0].float()
         imgs, poses, hwf, bound = imgs.to(device), poses.to(device), hwf.to(device), bound.to(device)
-        imgs, poses, hwf, bound = imgs.squeeze(), poses.squeeze(), hwf.squeeze(), bound.squeeze()
+        imgs, poses = imgs.squeeze(), poses.squeeze()
+
 
         tto_imgs, test_imgs = torch.split(imgs, [args.tto_views, args.test_views], dim=0)
         tto_poses, test_poses = torch.split(poses, [args.tto_views, args.test_views], dim=0)

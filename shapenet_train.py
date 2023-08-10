@@ -7,6 +7,9 @@ from torch.utils.data import DataLoader
 from datasets.shapenet import build_shapenet
 from models.nerf import build_nerf
 from models.rendering import get_rays_shapenet, sample_points, volume_render
+from dataset import NeRFShapeNetDataset
+from load_generalized import load_many_data
+from tqdm import tqdm
 
 
 def inner_loop(model, optim, imgs, poses, hwf, bound, num_samples, raybatch_size, inner_steps):
@@ -34,14 +37,21 @@ def inner_loop(model, optim, imgs, poses, hwf, bound, num_samples, raybatch_size
         optim.step()
 
 
-def train_meta(args, meta_model, meta_optim, data_loader, device):
+def train_meta(args, meta_model, meta_optim, data_loader, hwf, device):
     """
     train the meta_model for one epoch using reptile meta learning
     https://arxiv.org/abs/1803.02999
     """
-    for imgs, poses, hwf, bound in data_loader:
+
+    H, W, focal = hwf
+    H, W = int(H), int(W)
+    hwf = torch.tensor([H, W, focal])
+    bound = torch.tensor([2., 6.])
+
+    for batch in data_loader:
+        imgs, poses = batch["images"][0].float(), batch["cam_poses"][0].float()
         imgs, poses, hwf, bound = imgs.to(device), poses.to(device), hwf.to(device), bound.to(device)
-        imgs, poses, hwf, bound = imgs.squeeze(), poses.squeeze(), hwf.squeeze(), bound.squeeze()
+        imgs, poses = imgs.squeeze(), poses.squeeze()
 
         meta_optim.zero_grad()
 
@@ -89,7 +99,7 @@ def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
     return scene_psnr
 
 
-def val_meta(args, model, val_loader, device):
+def val_meta(args, model, val_loader, hwf, device):
     """
     validate the meta trained model for few-shot view synthesis
     """
@@ -97,10 +107,16 @@ def val_meta(args, model, val_loader, device):
     val_model = copy.deepcopy(model)
     
     val_psnrs = []
-    for imgs, poses, hwf, bound in val_loader:
-        imgs, poses, hwf, bound = imgs.to(device), poses.to(device), hwf.to(device), bound.to(device)
-        imgs, poses, hwf, bound = imgs.squeeze(), poses.squeeze(), hwf.squeeze(), bound.squeeze()
 
+    H, W, focal = hwf
+    H, W = int(H), int(W)
+    hwf = torch.tensor([H, W, focal])
+    bound = torch.tensor([2., 6.])
+    scene_c = 0
+    for batch in val_loader:
+        imgs, poses = batch["images"].float(), batch["cam_poses"].float()
+        imgs, poses, hwf, bound = imgs.to(device), poses.to(device), hwf.to(device), bound.to(device)
+        imgs, poses = imgs.squeeze(), poses.squeeze()
         tto_imgs, test_imgs = torch.split(imgs, [args.tto_views, args.test_views], dim=0)
         tto_poses, test_poses = torch.split(poses, [args.tto_views, args.test_views], dim=0)
 
@@ -112,6 +128,8 @@ def val_meta(args, model, val_loader, device):
         
         scene_psnr = report_result(val_model, test_imgs, test_poses, hwf, bound, 
                                     args.num_samples, args.test_batchsize)
+        print(f"Scene {scene_c} PSNR: ", scene_psnr)
+        scene_c += 1
         val_psnrs.append(scene_psnr)
 
     val_psnr = torch.stack(val_psnrs).mean()
@@ -131,14 +149,13 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_set = build_shapenet(image_set="train", dataset_root=args.dataset_root,
-                                splits_path=args.splits_path, num_views=args.train_views)
+    train_set = NeRFShapeNetDataset(root_dir="data/multiple", classes=["cars"])
     train_loader = DataLoader(train_set, batch_size=1, shuffle=True)
 
-    val_set = build_shapenet(image_set="val", dataset_root=args.dataset_root,
-                            splits_path=args.splits_path,
-                            num_views=args.tto_views+args.test_views)
+    val_set = NeRFShapeNetDataset(root_dir="data/multiple", classes=["cars"], train=False)
     val_loader = DataLoader(val_set, batch_size=1, shuffle=False)
+
+    objects, test_objects, render_poses, hwf = load_many_data(f'data/multiple/cars')
 
     meta_model = build_nerf(args)
     meta_model.to(device)
@@ -146,8 +163,10 @@ def main():
     meta_optim = torch.optim.Adam(meta_model.parameters(), lr=args.meta_lr)
 
     for epoch in range(1, args.meta_epochs+1):
-        train_meta(args, meta_model, meta_optim, train_loader, device)
-        val_psnr = val_meta(args, meta_model, val_loader, device)
+        print("*"*50, f"Epoch: {epoch} TRAIN")
+        train_meta(args, meta_model, meta_optim, train_loader, hwf, device)
+        print("-" * 50, f"VAL")
+        val_psnr = val_meta(args, meta_model, val_loader, hwf, device)
         print(f"Epoch: {epoch}, val psnr: {val_psnr:0.3f}")
 
         torch.save({
