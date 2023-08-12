@@ -4,8 +4,6 @@ import copy
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from datasets.shapenet import build_shapenet
-from models.nerf import build_nerf
 from models.rendering import get_rays_shapenet, sample_points, volume_render
 from dataset import NeRFShapeNetDataset
 from load_generalized import load_many_data
@@ -14,6 +12,7 @@ from multiplane_helpers_generalized import ImagePlane
 from multiplane_nerf_utils import device
 import numpy as np
 from tqdm import tqdm
+
 
 def inner_loop(model, optim, imgs, poses, hwf, bound, num_samples, raybatch_size, inner_steps):
     """
@@ -45,7 +44,6 @@ def inner_multiplane_loop(render_kwargs_train, optim, imgs, poses, hwf, hwk, bou
     train the inner model for a specified number of iterations
     """
     H, W, K = hwk
-    pixels = imgs.reshape(-1, 3)
 
     img_i = np.random.choice(list(range(45)))
     target = imgs[img_i]
@@ -56,9 +54,6 @@ def inner_multiplane_loop(render_kwargs_train, optim, imgs, poses, hwf, hwk, bou
     rays_o, rays_d = get_rays(H, W, K, torch.Tensor(pose))
     coords = torch.stack(torch.meshgrid(torch.linspace(0, H - 1, H), torch.linspace(0, W - 1, W)), -1)  # (H, W, 2)
     coords = torch.reshape(coords, [-1, 2])
-    #rays_o, rays_d = get_rays_shapenet(hwf, poses)
-    #rays_o, rays_d = rays_o.reshape(-1, 3), rays_d.reshape(-1, 3)
-
 
     for step in range(inner_steps):
         select_inds = np.random.choice(coords.shape[0], size=[raybatch_size], replace=False)
@@ -69,28 +64,16 @@ def inner_multiplane_loop(render_kwargs_train, optim, imgs, poses, hwf, hwk, bou
         batch_rays = batch_rays.to("cpu")
         target_s = target[select_coords[:, 0], select_coords[:, 1]]
 
-        #indices = torch.randint(num_rays, size=[raybatch_size])
-        # raybatch_o, raybatch_d = rays_o[indices], rays_d[indices]
-        # pixelbatch = pixels[indices]
-        # t_vals, xyz = sample_points(raybatch_o, raybatch_d, bound[0], bound[1],
-        #                             num_samples, perturb=True)
-
-
         optim.zero_grad()
         rgb, disp, acc, extras = render(H, W, K, rays=batch_rays,
                                         verbose=False, retraw=True,
                                         **render_kwargs_train)
-        # rgbs, sigmas = model(xyz)
-        # colors = volume_render(rgbs, sigmas, t_vals, white_bkgd=True)
         rgb = rgb.to(device)
         target_s = target_s.to(device)
         img_loss = img2mse(rgb, target_s)
         loss = img_loss
-        # loss = F.mse_loss(colors, pixelbatch)
         loss.backward()
         optim.step()
-
-
 
 
 def train_meta(args, render_kwargs_train, meta_optim, data_loader, hwf, device):
@@ -325,9 +308,6 @@ def main():
     train_set = NeRFShapeNetDataset(root_dir="data/multiple", classes=["cars"])
     train_loader = DataLoader(train_set, batch_size=1, shuffle=True)
 
-    val_set = NeRFShapeNetDataset(root_dir="data/multiple", classes=["cars"], train=False)
-    val_loader = DataLoader(val_set, batch_size=1, shuffle=False)
-
     objects, test_objects, render_poses, hwf = load_many_data(f'data/multiple/cars')
 
     render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_mi_nerf(50, args)
@@ -344,9 +324,6 @@ def main():
     for epoch in range(1, args.meta_epochs+1):
         print("*"*50, f"Epoch: {epoch} TRAIN")
         train_meta(args, render_kwargs_train, meta_optim, train_loader, hwf, device)
-        print("-" * 50, f"VAL")
-        #val_psnr = val_meta(args, meta_model, val_loader, hwf, device)
-        #print(f"Epoch: {epoch}, val psnr: {val_psnr:0.3f}")
 
         torch.save({
             'epoch': epoch,

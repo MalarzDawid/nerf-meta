@@ -1,5 +1,6 @@
 import torch
 
+
 class RenderNetwork(torch.nn.Module):
     def __init__(
         self,
@@ -51,6 +52,7 @@ class RenderNetwork(torch.nn.Module):
         rgb = self.layers_rgb(x)
         return torch.concat([rgb, sigma], dim=1)
 
+
 class ImagePlane(torch.nn.Module):
 
     def __init__(self, focal, poses, images, count, device='cuda'):
@@ -84,12 +86,11 @@ class ImagePlane(torch.nn.Module):
             self.image_plane = torch.stack(self.images).to(device)
             self.centroids = torch.stack(self.centroids).to(device) 
 
-
     def forward(self, points=None):
         if points.shape[0] == 1:
             points = points[0]
 
-        points = torch.concat([points, torch.ones(points.shape[0], 1).to(points.device)], 1).to(points.device)
+        points = torch.concat([points, torch.ones(points.shape[0], 1).to(points.device)], 1).to("cuda:0")
         ps = self.K_matrices @ self.pose_matrices @ points.T
         pixels = (ps/ps[:,None,2])[:,0:2,:]
         pixels = pixels / self.size
@@ -115,7 +116,8 @@ class ImagePlane(torch.nn.Module):
         feats = torch.cat((feats, cposes.unsqueeze(0).repeat(feats.shape[0], 1)), dim=1)
 
         return feats
-    
+
+
 class MultiImageNeRF(torch.nn.Module):
     
     def __init__(self, image_plane, count, dir_count):
@@ -133,7 +135,7 @@ class MultiImageNeRF(torch.nn.Module):
         
     def forward(self, x):
         input_pts, input_views = torch.split(x, [3, self.input_ch_views], dim=-1)
+        input_pts = input_pts.to("cuda:0")
+        input_views = input_views.to("cuda:0")
         x = self.image_plane(input_pts)
         return self.render_network(x, input_views)
-    
-    
