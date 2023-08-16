@@ -233,7 +233,6 @@ def test():
 
     objects, test_objects, render_poses, hwf = load_many_data(f'data/multiple/cars')
 
-
     render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_mi_nerf(50, args)
     global_step = start
 
@@ -269,7 +268,7 @@ def test():
         tto_imgs, test_imgs = torch.split(imgs, [args.tto_views, args.test_views], dim=0)
         tto_poses, test_poses = torch.split(poses, [args.tto_views, args.test_views], dim=0)
 
-        optim = torch.optim.SGD(render_kwargs_train["network_fn"].parameters(), args.tto_lr)
+        optim = torch.optim.Adam(render_kwargs_train["network_fn"].parameters(), args.tto_lr)
 
         image_plane = ImagePlane(focal, poses.cpu().numpy(), imgs.cpu().numpy(), 50)
 

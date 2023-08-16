@@ -7,11 +7,12 @@ from torch.utils.data import DataLoader
 from models.rendering import get_rays_shapenet, sample_points, volume_render
 from dataset import NeRFShapeNetDataset
 from load_generalized import load_many_data
-from multiplane_nerf_utils import create_mi_nerf, get_rays, render, img2mse
+from multiplane_nerf_utils import create_mi_nerf, get_rays, render, img2mse, mse2psnr
 from multiplane_helpers_generalized import ImagePlane
 from multiplane_nerf_utils import device
 import numpy as np
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 
 def inner_loop(model, optim, imgs, poses, hwf, bound, num_samples, raybatch_size, inner_steps):
@@ -39,13 +40,13 @@ def inner_loop(model, optim, imgs, poses, hwf, bound, num_samples, raybatch_size
         optim.step()
 
 
-def inner_multiplane_loop(render_kwargs_train, optim, imgs, poses, hwf, hwk, bound, num_samples, raybatch_size, inner_steps):
+def inner_multiplane_loop(inner_model, optim, imgs, poses, hwf, hwk, raybatch_size, inner_steps):
     """
     train the inner model for a specified number of iterations
     """
     H, W, K = hwk
 
-    img_i = np.random.choice(list(range(45)))
+    img_i = np.random.choice(list(range(imgs.shape[0])))
     target = imgs[img_i]
     target = torch.Tensor(target).to(device)
     pose = poses[img_i, :3, :4]
@@ -54,6 +55,8 @@ def inner_multiplane_loop(render_kwargs_train, optim, imgs, poses, hwf, hwk, bou
     rays_o, rays_d = get_rays(H, W, K, torch.Tensor(pose))
     coords = torch.stack(torch.meshgrid(torch.linspace(0, H - 1, H), torch.linspace(0, W - 1, W)), -1)  # (H, W, 2)
     coords = torch.reshape(coords, [-1, 2])
+
+    total_pnsr, total_loss = [], []
 
     for step in range(inner_steps):
         select_inds = np.random.choice(coords.shape[0], size=[raybatch_size], replace=False)
@@ -64,16 +67,20 @@ def inner_multiplane_loop(render_kwargs_train, optim, imgs, poses, hwf, hwk, bou
         batch_rays = batch_rays.to("cpu")
         target_s = target[select_coords[:, 0], select_coords[:, 1]]
 
-        optim.zero_grad()
         rgb, disp, acc, extras = render(H, W, K, rays=batch_rays,
                                         verbose=False, retraw=True,
-                                        **render_kwargs_train)
+                                        **inner_model)
+        optim.zero_grad()
         rgb = rgb.to(device)
         target_s = target_s.to(device)
-        img_loss = img2mse(rgb, target_s)
-        loss = img_loss
+        loss = F.mse_loss(rgb, target_s)
+        psnr = mse2psnr(loss.to("cpu"))
+        total_pnsr.append(float(psnr))
+        total_loss.append(float(loss.item()))
+
         loss.backward()
         optim.step()
+    return total_pnsr, total_loss
 
 
 def train_meta(args, render_kwargs_train, meta_optim, data_loader, hwf, device):
@@ -93,32 +100,39 @@ def train_meta(args, render_kwargs_train, meta_optim, data_loader, hwf, device):
         [0, 0, 1]
     ])
     hwk = (H, W, K)
-
-    for batch in tqdm(data_loader):
+    epoch_psnr = []
+    epoch_loss = []
+    for batch_idx, batch in tqdm(enumerate(data_loader)):
         imgs, poses = batch["images"][0].float(), batch["cam_poses"][0].float()
         imgs, poses, hwf = imgs.to(device), poses.to(device), hwf.to(device)
         imgs, poses = imgs.squeeze(), poses.squeeze()
 
         image_plane = ImagePlane(focal, poses.cpu().numpy(), imgs.cpu().numpy(), 50)
 
-        render_kwargs_train['network_fn'].image_plane = image_plane
-        render_kwargs_train['network_fine'].image_plane = image_plane
-
         meta_optim.zero_grad()
 
         inner_render_kwargs_train = copy.deepcopy(render_kwargs_train)
-        inner_optim = torch.optim.SGD(inner_render_kwargs_train["network_fn"].parameters(), args.inner_lr)
 
-        inner_multiplane_loop(inner_render_kwargs_train, inner_optim, imgs, poses,
-                    hwf, hwk, bound, args.num_samples,
-                    512, args.inner_steps)
-        
+        inner_render_kwargs_train['network_fn'].image_plane = image_plane
+        inner_render_kwargs_train['network_fine'].image_plane = image_plane
+
+        inner_optim = torch.optim.Adam(inner_render_kwargs_train["network_fn"].parameters(), lr=0.1)
+
+        psnr, loss = inner_multiplane_loop(inner_render_kwargs_train, inner_optim, imgs, poses, hwf, hwk, args.N_rand,
+                              args.inner_steps)
+
         with torch.no_grad():
-            for meta_param, inner_param in zip(render_kwargs_train["network_fn"].parameters(), inner_render_kwargs_train["network_fn"].parameters()):
+            for meta_param, inner_param in zip(render_kwargs_train["network_fine"].parameters(), inner_render_kwargs_train["network_fine"].parameters()):
+                # print(f"Meta param: {meta_param} Inner param: {inner_param} New: {meta_param-inner_param}")
                 meta_param.grad = meta_param - inner_param
         
         meta_optim.step()
+        epoch_psnr.append(sum(psnr)/args.inner_steps)
+        epoch_loss.append(sum(loss) / args.inner_steps)
 
+    print("AVG PSNR: ", sum(epoch_psnr)/len(epoch_psnr))
+    print("AVG LOSS: ", sum(epoch_loss)/len(epoch_psnr))
+    return epoch_psnr, epoch_loss
 
 def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
     """
@@ -150,12 +164,12 @@ def report_result(model, imgs, poses, hwf, bound, num_samples, raybatch_size):
     return scene_psnr
 
 
-def val_meta(args, model, val_loader, hwf, device):
+def val_meta(args, render_kwargs_train, val_loader, hwf, device):
     """
     validate the meta trained model for few-shot view synthesis
     """
-    meta_trained_state = model.state_dict()
-    val_model = copy.deepcopy(model)
+    meta_trained_state = render_kwargs_train["network_fn"].state_dict()
+    val_model = copy.deepcopy(render_kwargs_train["network_fn"])
     
     val_psnrs = []
 
@@ -163,6 +177,14 @@ def val_meta(args, model, val_loader, hwf, device):
     H, W = int(H), int(W)
     hwf = torch.tensor([H, W, focal])
     bound = torch.tensor([2., 6.])
+
+    K = np.array([
+        [focal.item(), 0, 0.5 * W],
+        [0, focal.item(), 0.5 * H],
+        [0, 0, 1]
+    ])
+    hwk = (H, W, K)
+
     scene_c = 0
     for batch in val_loader:
         imgs, poses = batch["images"].float(), batch["cam_poses"].float()
@@ -172,16 +194,15 @@ def val_meta(args, model, val_loader, hwf, device):
         tto_poses, test_poses = torch.split(poses, [args.tto_views, args.test_views], dim=0)
 
         val_model.load_state_dict(meta_trained_state)
-        val_optim = torch.optim.SGD(val_model.parameters(), args.tto_lr)
+        val_optim = torch.optim.Adam(val_model.parameters(), args.tto_lr)
 
-        inner_loop(val_model, val_optim, tto_imgs, tto_poses, hwf,
-                    bound, args.num_samples, args.tto_batchsize, args.tto_steps)
+        _, _ = inner_multiplane_loop(render_kwargs_train, val_optim, tto_imgs, tto_poses, hwf, hwk, args.N_rand, args.tto_steps)
         
-        scene_psnr = report_result(val_model, test_imgs, test_poses, hwf, bound, 
-                                    args.num_samples, args.test_batchsize)
-        print(f"Scene {scene_c} PSNR: ", scene_psnr)
-        scene_c += 1
-        val_psnrs.append(scene_psnr)
+        # scene_psnr = report_result(val_model, test_imgs, test_poses, hwf, bound,
+        #                             args.num_samples, args.test_batchsize)
+        # print(f"Scene {scene_c} PSNR: ", scene_psnr)
+        # scene_c += 1
+        # val_psnrs.append(scene_psnr)
 
     val_psnr = torch.stack(val_psnrs).mean()
     return val_psnr
@@ -308,9 +329,12 @@ def main():
     train_set = NeRFShapeNetDataset(root_dir="data/multiple", classes=["cars"])
     train_loader = DataLoader(train_set, batch_size=1, shuffle=True)
 
+    # val_set = NeRFShapeNetDataset(root_dir="data/multiple", classes=["cars"])
+    # val_loader = DataLoader(val_set, batch_size=1, shuffle=True)
+
     objects, test_objects, render_poses, hwf = load_many_data(f'data/multiple/cars')
 
-    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_mi_nerf(50, args)
+    render_kwargs_train, render_kwargs_test, start, grad_vars, meta_optim = create_mi_nerf(50, args)
     global_step = start
 
     bds_dict = {
@@ -319,17 +343,23 @@ def main():
     }
     render_kwargs_train.update(bds_dict)
 
-    meta_optim = optimizer
-
+    # meta_optim = torch.optim.Adam(render_kwargs_train["network_fn"].parameters(), args.inner_lr)
+    losses = []
+    psnrs = []
     for epoch in range(1, args.meta_epochs+1):
         print("*"*50, f"Epoch: {epoch} TRAIN")
-        train_meta(args, render_kwargs_train, meta_optim, train_loader, hwf, device)
-
+        psnr, loss = train_meta(args, render_kwargs_train, meta_optim, train_loader, hwf, device)
+        losses.append(sum(loss)/len(loss))
+        psnrs.append(sum(psnr)/len(psnr))
+        # val_meta(args, render_kwargs_train, val_loader, hwf, device)
         torch.save({
             'epoch': epoch,
             'meta_model_state_dict': render_kwargs_train["network_fn"].state_dict(),
             'meta_optim_state_dict': meta_optim.state_dict(),
             }, f'outputs/meta_epoch{epoch}.pth')
+    plt.plot(losses)
+    plt.savefig(f"loss_plot_{epoch}.png")
+    plt.close()
 
 
 if __name__ == '__main__':
