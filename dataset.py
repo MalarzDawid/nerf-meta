@@ -106,7 +106,7 @@ class NeRFShapeNetDataset(Dataset):
 
             npz_glob =  glob.glob(join(self.root_dir,data_class,'sampled','*.npz'))
             print(len(npz_glob))
-            for file in npz_glob:
+            for file in npz_glob[:1]:
                 sample_name = file.split('_')[-1].split('.')[0]
 
                 df = pd.concat([df, pd.DataFrame([{'class': data_class,

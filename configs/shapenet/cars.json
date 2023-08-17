@@ -1,4 +1,11 @@
 {
+    "inner_lr": 1e-5,
+
+    "inner_steps": 500,
+    "N_rand":  512,
+    "N_samples":  64,
+    "N_importance": 128,
+
     "dataset_root": "./data/shapenetcars/cars/02958343",
     "splits_path": "./data/shapenetcars/car_splits.json",
 
@@ -9,16 +16,18 @@
 
     "train_views": 50,
     "meta_epochs": 30,
-    "meta_lr": 1e-5,
+    "meta_lr": 1e-4,
     "train_batchsize": 128,
-    "num_samples": 128,
-    "inner_lr": 1e-5,
-    "inner_steps": 32,
+
+
+
 
     "tto_views": 1,
-    "tto_lr": 0.5,
-    "tto_batchsize": 64,
+    "tto_lr": 1e-8,
+    "tto_batchsize": 128,
     "tto_steps": 2000,
+
+
 
     "test_views": 49,
     "test_batchsize": 4096,
@@ -33,9 +42,7 @@
     "use_viewdirs": true,
     "white_bkgd":  true,
     "lrate_decay":  100,
-    "N_samples":  64,
-    "N_importance": 128,
-    "N_rand":  512,
+
     "precrop_iters": 0,
     "precrop_frac":  0.5,
     "half_res":  false,

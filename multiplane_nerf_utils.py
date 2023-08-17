@@ -146,7 +146,7 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
 
     t = time.time()
     for i, c2w in enumerate(tqdm(render_poses)):
-        print(i, time.time() - t)
+        print("Time", i, time.time() - t)
         t = time.time()
         rgb, disp, acc, _ = render(H, W, K, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
         rgbs.append(rgb.cpu().numpy())
@@ -201,7 +201,7 @@ def create_mi_nerf(count, args):
         grad_vars += list(model_fine.parameters())
 
     # Create optimizer
-    optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
+    optimizer = torch.optim.Adam(params=grad_vars, lr=args.meta_lr, betas=(0.9, 0.999))
 
     start = 0
     basedir = args.basedir
@@ -227,7 +227,7 @@ def create_mi_nerf(count, args):
         optimizer.load_state_dict(ckpt['meta_optim_state_dict'])
 
         # Load model
-        model.load_state_dict(ckpt['meta_model_state_dict'])
+        model.load_state_dict(ckpt['meta_model_fn_state_dict'])
 
     ##########################
 
