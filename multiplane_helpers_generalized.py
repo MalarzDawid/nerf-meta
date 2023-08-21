@@ -65,8 +65,7 @@ class ImagePlane(torch.nn.Module):
 
             self.focal = focal
             for i in range(min(count, poses.shape[0])):
-                M = poses[i]
-                M = torch.from_numpy(M)                
+                M = poses[i]            
                 M = M @ torch.Tensor([[-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]).to(M.device)
                 self.centroids.append(M[0:3, 3])
                 M = torch.inverse(M)
@@ -74,17 +73,16 @@ class ImagePlane(torch.nn.Module):
                 self.pose_matrices.append(M) 
 
                 image = images[i]
-                image = torch.from_numpy(image)
                 self.images.append(image.permute(2,0,1))
                 self.size = float(image.shape[0])
-                K = torch.Tensor([[self.focal.item(), 0, 0.5*image.shape[0]], [0, self.focal.item(), 0.5*image.shape[0]], [0, 0, 1]])
+                K = torch.Tensor([[self.focal.item(), 0, 0.5*image.shape[0]], [0, self.focal.item(), 0.5*image.shape[0]], [0, 0, 1]]).to(device)
 
                 self.K_matrices.append(K)
 
-            self.pose_matrices = torch.stack(self.pose_matrices).to(device)
-            self.K_matrices = torch.stack(self.K_matrices).to(device)
-            self.image_plane = torch.stack(self.images).to(device)
-            self.centroids = torch.stack(self.centroids).to(device) 
+            self.pose_matrices = torch.stack(self.pose_matrices)
+            self.K_matrices = torch.stack(self.K_matrices)
+            self.image_plane = torch.stack(self.images)
+            self.centroids = torch.stack(self.centroids)
 
     def forward(self, points=None):
         if points.shape[0] == 1:
