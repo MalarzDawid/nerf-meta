@@ -1,27 +1,67 @@
 {
-    "dataset_root": "./data/shapenetcars/cars/02958343",
-    "splits_path": "./data/shapenetcars/car_splits.json",
+    "root_dir": "data/multiple",
+    "class_name": "cars",
+    "logger": true,
 
+    "neptune_project": "maml-nerf/maml-nerf",
+    "neptune_tags": [
+        "cars",
+        "model_54"
+    ],
+    
+    "meta_epochs": 10,
+    "meta_lr": 0.0001,
+
+    "inner_steps": 7,
+    "inner_lr": 0.0001,
+    
+    "tto_steps": 5,
+    "tto_lr": 0.01,
+
+    "train_batchsize": 128,
+    "tto_batchsize": 128,
+    "test_batchsize": 4096,
+
+    "tto_views": 25,
+    "train_views": 25,
+    "test_views": 25,
+    "multiplane_views": 25,
+
+    "N_rand":  512,
+    "N_samples":  64,
+    "N_importance": 128,
+    
+    "bound_near": 2,
+    "bound_far": 6,
+    
+    "multires": 10,
+    "multires_views": 4,
+    "i_embed": -1,
     "max_freq": 8,
     "num_freqs": 20,
+    "ft_path": null,
+    "perturb": 1.0,
+    "raw_noise_std": 0.0,
+    "lindisp": true,
     "hidden_layers": 5,
     "hidden_features": 256,
+    "netchunk": 65536,
+    "chunk": 65536,
+    
 
-    "train_views": 25,
-    "meta_epochs": 30,
-    "meta_lr": 5e-5,
-    "train_batchsize": 128,
-    "num_samples": 128,
-    "inner_lr": 0.5,
-    "inner_steps": 32,
-
-    "tto_views": 1,
-    "tto_lr": 0.5,
-    "tto_batchsize": 64,
-    "tto_steps": 2000,
-
-    "test_views": 25,
-    "test_batchsize": 4096,
     "radius": 4.0,
-    "savedir": "./videos"
+    "basedir":  "./logs_4",
+    "expname":  "generalized_cars_all",
+    "dataset_type":  "many",
+   
+    "no_batching": true,
+    "use_viewdirs": true,
+    "white_bkgd":  true,
+    "lrate_decay":  100,
+
+    "precrop_iters": 0,
+    "precrop_frac":  0.5,
+    "half_res":  false,
+    "render_only": false,
+    "i_weights":  10
 }
